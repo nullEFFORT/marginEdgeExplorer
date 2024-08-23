@@ -1,0 +1,33 @@
+# Ignore environment variables file
+.env
+
+# Ignore .cf files - lazy lazy lazy
+*.cf
+
+# Ignore Python bytecode
+__pycache__/
+*.py[cod]
+
+# Ignore logs
+*.log
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE specific files
+.vscode/
+.idea/
+
+# Ignore virtual environment
+venv/
+env/
+
+# Ignore any local configuration files
+*.config
+
+# Any other lazy ass files laying around
+PROMPT
+
+# Vendor specific data
+*.json
