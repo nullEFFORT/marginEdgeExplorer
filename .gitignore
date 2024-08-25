@@ -103,3 +103,4 @@ ENV/
 # lazy shit
 *.cf
 PROMPT
+*.json
