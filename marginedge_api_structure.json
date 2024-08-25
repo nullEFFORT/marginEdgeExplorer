@@ -1,0 +1,73 @@
+{
+  "restaurant_units": {
+    "restaurants": [
+      {
+        "id": "int",
+        "name": "str"
+      }
+    ]
+  },
+  "categories": {
+    "nextPage": "str",
+    "categories": [
+      {
+        "categoryId": "str",
+        "categoryName": "str",
+        "categoryType": "str",
+        "accountingCode": "str"
+      }
+    ]
+  },
+  "products": {
+    "nextPage": "str",
+    "products": [
+      {
+        "companyConceptProductId": "str",
+        "centralProductId": "str",
+        "productName": "str",
+        "categories": [
+          {
+            "categoryId": "str",
+            "percentAllocation": "float"
+          }
+        ],
+        "itemCount": "int",
+        "taxExempt": "bool",
+        "reportByUnit": "str",
+        "latestPrice": "float"
+      }
+    ]
+  },
+  "vendors": {
+    "nextPage": "str",
+    "vendors": [
+      {
+        "vendorId": "str",
+        "centralVendorId": "str",
+        "vendorName": "str",
+        "vendorAccounts": [
+          {
+            "vendorAccountNumber": "str"
+          }
+        ]
+      }
+    ]
+  },
+  "orders": {
+    "nextPage": "str",
+    "orders": [
+      {
+        "orderId": "str",
+        "createdDate": "str",
+        "vendorId": "str",
+        "vendorName": "str",
+        "customerNumber": "str",
+        "invoiceNumber": "str",
+        "invoiceDate": "str",
+        "paymentAccount": "str",
+        "status": "str",
+        "orderTotal": "float"
+      }
+    ]
+  }
+}

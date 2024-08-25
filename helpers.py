@@ -1,198 +1,197 @@
-import json
 from datetime import datetime, timedelta
 
-def load_data(file_path='marginedge_api_full_data.json'):
-    try:
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        print(f"Loaded data from {file_path}")
-        print(f"Keys in data: {list(data.keys())}")
-        for key, value in data.items():
-            if isinstance(value, dict) and 'nextPage' in value and value.get(key.lower()):
-                print(f"Number of {key}: {len(value.get(key.lower(), []))}")
-            elif isinstance(value, list):
-                print(f"Number of {key}: {len(value)}")
-            else:
-                print(f"{key}: Unable to determine count")
-        return data
-    except FileNotFoundError:
-        print(f"Error: {file_path} not found. Please ensure the file exists.")
-        return None
-    except json.JSONDecodeError:
-        print(f"Error: {file_path} is not a valid JSON file.")
-        return None
-
-def get_data_summary(data):
-    if not data:
-        return "No data available."
+def search_products(client, restaurant_unit_id, query):
+    query = query.lower()
+    all_products = client.get_products(restaurant_unit_id)
     
-    summary = []
-    if 'restaurant_units' in data:
-        summary.append(f"Restaurant Units: {len(data['restaurant_units'].get('restaurants', []))} units")
-    if 'categories' in data:
-        summary.append(f"Categories: {len(data['categories'].get('categories', []))} categories")
-    if 'products' in data:
-        summary.append(f"Products: {len(data['products'].get('products', []))} products")
-    if 'vendors' in data:
-        summary.append(f"Vendors: {len(data['vendors'].get('vendors', []))} vendors")
-    if 'orders' in data:
-        summary.append(f"Orders: {len(data['orders'].get('orders', []))} orders")
+    matching_products = []
+    for product in all_products:
+        product_name = product["productName"].lower()
+        product_category = product["categories"][0].get("categoryName", "").lower() if product.get("categories") else ""
+        
+        # Check for wines
+        if query == "all wines" and ("wine" in product_name or "wine" in product_category):
+            matching_products.append(product)
+        # Check for other queries
+        elif query in product_name or query in product_category:
+            matching_products.append(product)
     
-    return "\n".join(summary)
-
-def search_products(data, product_name):
-    products = data.get('products', {}).get('products', [])
-    matching_products = [p for p in products if product_name.lower() in p.get('productName', '').lower()]
-    
-    if not matching_products:
-        # If no exact matches, look for partial matches
-        matching_products = [p for p in products if any(word.lower() in p.get('productName', '').lower() for word in product_name.split())]
+    return [
+        {
+            "name": p["productName"],
+            "category": p["categories"][0].get("categoryName", "Unknown") if p.get("categories") else "Unknown",
+            "latest_price": p.get("latestPrice", "Unknown"),
+            "unit": p.get("reportByUnit", "Unknown"),
+            "id": p.get("companyConceptProductId", "Unknown")
+        }
+        for p in matching_products
+    ]
     
     return matching_products
 
-def get_vendor_purchases(data, product_name_or_id=None):
-    products = search_products(data, product_name_or_id) if product_name_or_id else data.get('products', {}).get('products', [])
-    orders = data.get('orders', {}).get('orders', [])
+def get_product_details(client, restaurant_unit_id, product_name):
+    products = search_products(client, restaurant_unit_id, product_name)
+    if not products:
+        return "Product not found."
+    
+    product = products[0]
+    details = client.get_product_details(restaurant_unit_id, product["id"])
+    
+    return {
+        "name": details["productName"],
+        "category": details["categories"][0]["categoryName"] if details["categories"] else "Unknown",
+        "latest_price": details["latestPrice"],
+        "unit": details.get("reportByUnit", "Unknown"),
+        "tax_exempt": details["taxExempt"],
+        "on_inventory": details["onInventory"]
+    }
 
-    vendor_purchases = {}
-    for product in products:
-        product_id = product['companyConceptProductId']
-        product_name = product['productName']
-        vendor_purchases[product_name] = {
-            'product_id': product_id,
-            'vendors': {},
-            'total_quantity': 0,
-            'total_spend': 0
-        }
+def get_product_price_history(client, restaurant_unit_id, product_name):
+    products = search_products(client, restaurant_unit_id, product_name)
+    if not products:
+        return "Product not found."
+    
+    product = products[0]
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=90)
+    try:
+        history = client.get_product_price_history(
+            restaurant_unit_id,
+            product["id"],
+            start_date.isoformat(),
+            end_date.isoformat()
+        )
+        
+        return [
+            {"date": entry["date"], "price": entry["price"]}
+            for entry in history
+        ]
+    except Exception as e:
+        return f"Unable to retrieve price history. Error: {str(e)}"
 
-        for order in orders:
-            vendor_name = order.get('vendorName', 'Unknown Vendor')
-            for item in order.get('lineItems', []):
-                if item.get('companyConceptProductId') == product_id:
-                    if vendor_name not in vendor_purchases[product_name]['vendors']:
-                        vendor_purchases[product_name]['vendors'][vendor_name] = {
-                            'quantity': 0,
-                            'total_spend': 0,
-                            'last_purchase_date': None
-                        }
-                    
-                    quantity = item.get('quantity', 0)
-                    unit_price = item.get('unitPrice', 0)
-                    total = quantity * unit_price
-                    
-                    vendor_purchases[product_name]['vendors'][vendor_name]['quantity'] += quantity
-                    vendor_purchases[product_name]['vendors'][vendor_name]['total_spend'] += total
-                    vendor_purchases[product_name]['vendors'][vendor_name]['last_purchase_date'] = order.get('invoiceDate')
-                    vendor_purchases[product_name]['total_quantity'] += quantity
-                    vendor_purchases[product_name]['total_spend'] += total
+def get_vendor_purchases(client, restaurant_unit_id, product_name):
+    products = search_products(client, restaurant_unit_id, product_name)
+    if not products:
+        return "Product not found."
+    
+    product = products[0]
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=90)
+    orders = client.get_orders(restaurant_unit_id, start_date.isoformat(), end_date.isoformat())
+    
+    purchases = []
+    for order in orders:
+        order_details = client.get_order_detail(restaurant_unit_id, order["orderId"])
+        for item in order_details.get("lineItems", []):
+            if item["companyConceptProductId"] == product["id"]:
+                purchases.append({
+                    "date": order["invoiceDate"],
+                    "vendor": order["vendorName"],
+                    "quantity": item["quantity"],
+                    "unit_price": item["unitPrice"],
+                    "total_price": item["quantity"] * item["unitPrice"]
+                })
+    
+    return purchases
 
-    return vendor_purchases
-
-def get_top_vendors_by_spend(data, limit=5):
+def get_top_vendors_by_spend(client, restaurant_unit_id, limit=5):
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=90)
+    orders = client.get_orders(restaurant_unit_id, start_date.isoformat(), end_date.isoformat())
+    
     vendor_spend = {}
-    for order in data.get('orders', {}).get('orders', []):
-        vendor_name = order.get('vendorName', 'Unknown Vendor')
-        order_total = float(order.get('orderTotal', 0))
+    for order in orders:
+        vendor_name = order["vendorName"]
+        order_total = order["orderTotal"]
         vendor_spend[vendor_name] = vendor_spend.get(vendor_name, 0) + order_total
     
     sorted_vendors = sorted(vendor_spend.items(), key=lambda x: x[1], reverse=True)
     return sorted_vendors[:limit]
 
-def get_product_price_changes(data, days=5):
-    products = data.get('products', {}).get('products', [])
-    orders = data.get('orders', {}).get('orders', [])
-
-    cutoff_date = datetime.now() - timedelta(days=days)
-    recent_orders = [order for order in orders if datetime.fromisoformat(order.get('invoiceDate', '')) > cutoff_date]
-
+def get_product_price_changes(client, restaurant_unit_id, days=5):
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=days)
+    products = client.get_products(restaurant_unit_id)
+    
     price_changes = []
     for product in products:
-        product_id = product.get('companyConceptProductId')
-        product_name = product.get('productName')
-        recent_prices = [
-            item['unitPrice']
-            for order in recent_orders
-            for item in order.get('lineItems', [])
-            if item.get('companyConceptProductId') == product_id
-        ]
-        if len(set(recent_prices)) > 1:
-            price_changes.append({
-                'product': product_name,
-                'old_price': min(recent_prices),
-                'new_price': max(recent_prices)
-            })
-
+        try:
+            history = client.get_product_price_history(
+                restaurant_unit_id,
+                product["companyConceptProductId"],
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+            if len(history) > 1 and history[0]["price"] != history[-1]["price"]:
+                price_changes.append({
+                    "name": product["productName"],
+                    "old_price": history[0]["price"],
+                    "new_price": history[-1]["price"],
+                    "change": history[-1]["price"] - history[0]["price"]
+                })
+        except Exception:
+            continue
+    
     return price_changes
 
-def get_product_sales(data, product_name, days=7):
-    orders = data.get('orders', {}).get('orders', [])
-
-    cutoff_date = datetime.now() - timedelta(days=days)
-    recent_orders = [order for order in orders if datetime.fromisoformat(order.get('invoiceDate', '')) > cutoff_date]
-
-    total_sales = sum(
-        item.get('quantity', 0)
-        for order in recent_orders
-        for item in order.get('lineItems', [])
-        if product_name.lower() in item.get('vendorItemName', '').lower()
-    )
-
-    return total_sales
-
-def list_all_vendors(data):
-    return [vendor.get('vendorName', 'Unknown Vendor') for vendor in data.get('vendors', {}).get('vendors', [])]
-
-def get_product_price(data, product_name):
-    products = search_products(data, product_name)
-    if products:
-        return [(p['productName'], p['latestPrice']) for p in products]
-    return []
-
-def get_product_price_history(data, product_name_or_id):
-    products = search_products(data, product_name_or_id)
-    orders = data.get('orders', {}).get('orders', [])
-
+def analyze_price_trends(client, restaurant_unit_id, product_name, days=30):
+    products = search_products(client, restaurant_unit_id, product_name)
     if not products:
-        return f"No products found matching '{product_name_or_id}'."
-
-    price_histories = {}
-    for product in products:
-        product_id = product['companyConceptProductId']
-        product_name = product['productName']
-
-        price_history = []
-        for order in sorted(orders, key=lambda x: x.get('invoiceDate', ''), reverse=True):
-            for item in order.get('lineItems', []):
-                if item.get('companyConceptProductId') == product_id:
-                    price_history.append({
-                        'date': order.get('invoiceDate'),
-                        'price': item.get('unitPrice'),
-                        'vendor': order.get('vendorName')
-                    })
-
-        if price_history:
-            price_histories[product_name] = {
-                'product_id': product_id,
-                'price_history': price_history
-            }
-
-    if not price_histories:
-        return f"No price history found for products matching '{product_name_or_id}'."
-
-    return price_histories
-
-def get_product_details(data, product_name):
-    products = data.get('products', {}).get('products', [])
-    matching_products = [p for p in products if product_name.lower() in p.get('productName', '').lower()]
+        return "Product not found."
     
-    if matching_products:
-        return [{
-            'name': p.get('productName'),
-            'id': p.get('companyConceptProductId'),
-            'central_id': p.get('centralProductId'),
-            'latest_price': p.get('latestPrice'),
-            'report_by_unit': p.get('reportByUnit'),
-            'tax_exempt': p.get('taxExempt'),
-            'categories': [cat.get('categoryId') for cat in p.get('categories', [])]
-        } for p in matching_products]
-    return []
+    product = products[0]
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=days)
+    try:
+        history = client.get_product_price_history(
+            restaurant_unit_id,
+            product["id"],
+            start_date.isoformat(),
+            end_date.isoformat()
+        )
+        
+        if not history:
+            return "No price history available for this product."
+
+        oldest_price = history[0]["price"]
+        newest_price = history[-1]["price"]
+        price_change = newest_price - oldest_price
+        percent_change = (price_change / oldest_price) * 100
+
+        trend = "increasing" if price_change > 0 else "decreasing" if price_change < 0 else "stable"
+
+        return {
+            "product": product_name,
+            "trend": trend,
+            "price_change": price_change,
+            "percent_change": percent_change,
+            "oldest_price": oldest_price,
+            "newest_price": newest_price
+        }
+    except Exception as e:
+        return f"Unable to analyze price trends. Error: {str(e)}"
+
+def evaluate_vendor_performance(client, restaurant_unit_id, vendor_name):
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=90)
+    orders = client.get_orders(restaurant_unit_id, start_date.isoformat(), end_date.isoformat())
+    
+    vendor_orders = [order for order in orders if order["vendorName"] == vendor_name]
+    
+    if not vendor_orders:
+        return "No orders found for this vendor."
+
+    total_orders = len(vendor_orders)
+    total_spend = sum(order["orderTotal"] for order in vendor_orders)
+    avg_order_value = total_spend / total_orders if total_orders > 0 else 0
+
+    on_time_deliveries = sum(1 for order in vendor_orders if order["status"] == "CLOSED")
+    on_time_rate = (on_time_deliveries / total_orders) * 100 if total_orders > 0 else 0
+
+    return {
+        "vendor": vendor_name,
+        "total_orders": total_orders,
+        "total_spend": total_spend,
+        "avg_order_value": avg_order_value,
+        "on_time_rate": on_time_rate
+    }
